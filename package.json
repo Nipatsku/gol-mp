@@ -1,5 +1,5 @@
 {
-  "name": "lcjs-conways_game_of_life",
+  "name": "gol-mp",
   "version": "1.0.0",
   "description": "Implementation of the popular programmer challenge: Conways Game of Life, using LightningChart JS for hardware-accelerated rendering.",
   "main": "index.js",

@@ -23,7 +23,7 @@ module.exports = {
     output: {
         filename: '[name].bundle.js',
         path: path.resolve(__dirname, 'dist'),
-        publicPath: '/game-of-life_lcjs/'
+        publicPath: '/gol-mp/'
     },
     optimization:{
         splitChunks: {
@@ -33,7 +33,7 @@ module.exports = {
     plugins: [
         new HtmlWebpackPlugin({
             template: './src/index.html',
-            title: 'Conway\'s Game of Life'
+            title: 'Conway\'s Game of Life - MP'
         })
     ]
 }
