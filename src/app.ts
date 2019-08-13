@@ -269,6 +269,11 @@ class GameOfLife {
             )
         )
         this.cellStates = cellStates
+
+        // Use handleResize to initialize Array.
+        const width = this.cellStates.length
+        const height = this.cellStates[0].length
+        this.handleResize(width * this.px, height * this.px)
     }
 
 }
@@ -287,6 +292,12 @@ const rect = rectSeries.add({x1: 0, y1: 0, x2: 0, y2: 0})
     .setFillStyle(transparentFill)
     .setFillStyleHighlight(transparentFill)
 const handleResize = () => {
+    if (database) {
+        // Resizing breaks synchronization between server and clients.
+        // Throw an error !
+        throw new Error('Resizing is not allowed in multiplayer mode !')
+    }
+
     const width = axisX.scale.getCellSize()
     const height = axisY.scale.getCellSize()
     // Bind Axis intervals to Chart size as pixels.
@@ -607,9 +618,14 @@ const getCellState = (clientX: number, clientY: number) => {
             y: axisY.scale
         }
     )
-    const col = Math.round(location.x / gameOfLife.px)
-    const row = Math.round(location.y / gameOfLife.px)
-    return gameOfLife.cellStates[col][row]
+    const locationCol = Math.round(location.x / gameOfLife.px)
+    const locationRow = Math.round(location.y / gameOfLife.px)
+    // Check if location is within game of life boundaries.
+    const {bounds} = gameOfLife.getState()
+    if (locationCol < bounds.x.min || locationCol > bounds.x.max || locationRow < bounds.y.min || locationRow > bounds.y.max) {
+        return
+    }
+    return gameOfLife.cellStates[locationCol][locationRow]
 }
 const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     const location = translatePoint(
@@ -622,6 +638,14 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     )
     const locationCol = location.x / gameOfLife.px
     const locationRow = location.y / gameOfLife.px
+    // Check if location is within game of life boundaries.
+    const locationColRound = Math.round(locationCol)
+    const locationRowRound = Math.round(locationRow)
+    const {bounds} = gameOfLife.getState()
+    if (locationColRound < bounds.x.min || locationColRound > bounds.x.max || locationRowRound < bounds.y.min || locationRowRound > bounds.y.max) {
+        return
+    }
+
     const pattern = selectedPattern
     const uuid = Uuid()
     const interactionData = {
@@ -838,7 +862,7 @@ const connect = () => {
     database.ref('session-initialState').once("value", (snapshot) => {
         const value = snapshot.val()
         gameOfLife.decodeState(value)
-        handleResize()
+        // handleResize()
         plot()
     })
 
