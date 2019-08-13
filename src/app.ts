@@ -618,18 +618,16 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
         state: String(state)
     }
 
+    handleInteraction(interactionData)
+
     // Sync interaction with DB.
     if (database) {
         const key = database.ref().child('session-interactions').push().key
-
-        // Add local information, that interaction was handled already.
-        handledInteractions.push(uuid)
 
         const updates = {}
         updates['/session-interactions/' + key] = interactionData
         database.ref().update(updates)
     }
-    handleInteraction(interactionData)
     plot()
 }
 let drawMode = undefined
@@ -672,8 +670,8 @@ const subscribeToInteractions = () => {
             const interaction = value[key]
             let wasHandledAlready = false
             for (let iHandledInteraction = 0; iHandledInteraction < lenHandledInteractions; iHandledInteraction ++) {
-                const handledInteractionId = handledInteractions[iHandledInteraction]
-                if (handledInteractionId === interaction.uuid) {
+                const handledInteraction = handledInteractions[iHandledInteraction]
+                if (handledInteraction.uuid === interaction.uuid) {
                     wasHandledAlready = true
                     break
                 }
@@ -687,15 +685,56 @@ const subscribeToInteractions = () => {
         checkUnhandledInteractions(unhandledInteractions)
     })
 }
+let savedStates
 const checkUnhandledInteractions = (interactionsList: Array<any>) => {
     if (interactionsList.length === 0)
         return    
     // Sort unhandled interactions list on 'cycle' ascending order.
     const interactions = interactionsList.sort((a, b) => a.cycle - b.cycle)
+
     if (interactions[0].cycle < cycle) {
         // Back-tracking will be necessary ...
-        console.log('TODO: Backtrack interaction from: ',interactions[0].cycle, 'cur',cycle)
-        throw new Error()
+        if (! savedStates)
+            throw new Error('Back-tracking necessary, but previous states are not saved !')
+        
+        const backtrackTo = (iCycle) => {
+            // Find saved state.
+            const savedState = savedStates.find((state) => state.cycle === iCycle)
+            if (savedState === undefined)
+                throw new Error('Back-tracking necessary, but there is no saved state for cycle:'+iCycle)
+            
+            gameOfLife.decodeState(savedState.state)
+        }
+
+        // Combine unhandled and handled interactions into one list.
+        let allInteractions = handledInteractions.concat(interactions)
+        // Sort again.
+        allInteractions = allInteractions.sort((a, b) => a.cycle - b.cycle)
+
+        // Back-track to oldest unhandled interactions cycle.
+        let backTrackedCycle = interactions[0].cycle
+        console.log('back-tracking ',backTrackedCycle, cycle)
+        backtrackTo(backTrackedCycle)
+
+        // Iterate over cycles leading to current one.
+        for (let iCycle = backTrackedCycle; iCycle < cycle; iCycle ++) {
+            // Handle interactions of cycle i.
+            // TODO: Desynchronization can occur, if interaction order is relevant.
+            for (const interaction of allInteractions) {
+                if (interaction.cycle === iCycle) {
+                    handleInteraction(interaction)
+                }
+            }
+
+            // Increment cycle.
+            gameOfLife.cycle()
+        }
+        // Handle interactions of current cycle.
+        for (const interaction of allInteractions) {
+            if (interaction.cycle === cycle)
+                handleInteraction(interaction)
+        }
+
     } else {
         // All unhandled interactions should be of the current cycle.
         // They can be handled as is.
@@ -721,8 +760,9 @@ const handleInteraction = (interaction) => {
             }
         }
     }
-    // Mark as handled. Can result in duplicate entries !
-    handledInteractions.push(uuid)  
+    // Mark as handled (check for duplicates first).
+    if (handledInteractions.find((item) => item.uuid === uuid) === undefined)
+        handledInteractions.push(interaction)  
 }
 const host = () => {
     database = firebase.database()
@@ -737,17 +777,11 @@ const host = () => {
 
     // Host saves n previous states, in case it needs to back-track to previous states.
     // This can be necessary, if a client is too slow to report of its interactions in time.
-    const savedStates = []
+    savedStates = []
 
     sync = () => {
-        cycle++
-        database.ref('session-cycle').set(cycle)
-        
-        // Handle interactions before current cycle.
-        checkUnhandledInteractions(unhandledInteractions)
-        
         // Cache state for enabling back-tracking.
-        if (savedStates.length >= 5)
+        if (savedStates.length >= 8)
             savedStates.shift()
         savedStates.push({
             cycle,
@@ -756,7 +790,8 @@ const host = () => {
             state: gameOfLife.encodeState()
         })
 
-        // ... gameOfLife.cycle()
+        cycle++
+        database.ref('session-cycle').set(cycle)
     }
     sync()
 
