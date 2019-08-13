@@ -51,6 +51,13 @@ hideAxis(axisRight)
 
 class GameOfLife {
     // ----- Rendering properties -----
+    readonly outOfBoundsSeries = this.chart.addRectangleSeries()
+        .setDefaultStyle((rect) => rect
+            .setFillStyle(new SolidFill({ color: ColorRGBA(255, 200, 200) }))
+        )
+    readonly outOfBoundsRight = this.outOfBoundsSeries.add({x1: 0, y1: 0, x2: 0, y2: 0})
+    readonly outOfBoundsTop = this.outOfBoundsSeries.add({x1: 0, y1: 0, x2: 0, y2: 0})
+
     readonly points: PointSeries = this.chart.addPointSeries({
         pointShape: PointShape.Square
     })
@@ -274,6 +281,23 @@ class GameOfLife {
         const width = this.cellStates.length
         const height = this.cellStates[0].length
         this.handleResize(width * this.px, height * this.px)
+
+        // Render out of bounds area.
+        const dimensionsRight = {
+            x1: width * this.px,
+            y1: 0,
+            x2: axisX.scale.getInnerEnd(),
+            y2: axisY.scale.getInnerEnd()
+        }
+        this.outOfBoundsRight.setDimensions(dimensionsRight)
+
+        const dimensionsTop = {
+            x1: 0,
+            y1: (height + 1) * this.px,
+            x2: width * this.px,
+            y2: axisY.scale.getInnerEnd()
+        }
+        this.outOfBoundsTop.setDimensions(dimensionsTop)
     }
 
 }
