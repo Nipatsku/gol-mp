@@ -280,6 +280,7 @@ const gameOfLife = new GameOfLife(
 )
 const plot = () => {
     gameOfLife.plot()
+    console.log('currently rendered cycle: ',cycle)
 }
 const rectSeries = chart.addRectangleSeries()
 const rect = rectSeries.add({x1: 0, y1: 0, x2: 0, y2: 0})
@@ -309,14 +310,15 @@ gameOfLife.initialState()
 gameOfLife.plot()
 
 let simulationActive = false
-const cycle = () => {
+let cycle = 0
+const nextCycle = () => {
     if (sync)
         sync()
     gameOfLife.cycle()
     plot()
     if (simulationActive)
-        setTimeout(cycle, 100)
-        // requestAnimationFrame(cycle)
+        setTimeout(nextCycle, 200)
+        // requestAnimationFrame(nextCycle)
 }
 const col = chart.addUIElement(UILayoutBuilders.Column)
     .setPosition({ x: 0, y: 100 })
@@ -332,7 +334,7 @@ const toggleSimulationButton = col.addElement(UIElementBuilders.CheckBox)
 toggleSimulationButton.onSwitch((_, state) => {
         simulationActive = state
         if (simulationActive)
-            cycle()
+            nextCycle()
     })
 if (simulationActive)
     toggleSimulationButton.setOn(true)
@@ -594,23 +596,6 @@ const getCellState = (clientX: number, clientY: number) => {
     const row = Math.round(location.y / gameOfLife.px)
     return gameOfLife.cellStates[col][row]
 }
-const handleInteraction = (pattern: boolean[][], locationCol: number, locationRow: number, state: boolean | undefined) => {
-    const pHeight = pattern.length
-    const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
-
-    for (let y = 0; y < pattern.length; y ++) {
-        for (let x = 0; x < pattern[y].length; x ++) {
-            if (pattern[y][x] === true) {
-                const col = Math.round(locationCol + x - pWidth / 2)
-                const row = Math.round(locationRow - y + pHeight / 2)
-                gameOfLife.cellStates[col][row] = (state === undefined) ?
-                    (gameOfLife.cellStates[col][row] === true ? false : true):
-                    state
-            }
-        }
-    }
-    plot()  
-}
 const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     const location = translatePoint(
         chart.engine.clientLocation2Engine(clientX, clientY),
@@ -623,18 +608,19 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     const locationCol = location.x / gameOfLife.px
     const locationRow = location.y / gameOfLife.px
     const pattern = selectedPattern
+    const uuid = Uuid()
+    const interactionData = {
+        uuid,
+        cycle,
+        locationCol,
+        locationRow,
+        pattern,
+        state: String(state)
+    }
 
     // Sync interaction with DB.
     if (database) {
         const key = database.ref().child('session-interactions').push().key
-        const uuid = Uuid()
-        const interactionData = {
-            uuid,
-            x: locationCol,
-            y: locationRow,
-            pattern,
-            state: String(state)
-        }
 
         // Add local information, that interaction was handled already.
         handledInteractions.push(uuid)
@@ -643,7 +629,8 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
         updates['/session-interactions/' + key] = interactionData
         database.ref().update(updates)
     }
-    handleInteraction(pattern, locationCol, locationRow, state)
+    handleInteraction(interactionData)
+    plot()
 }
 let drawMode = undefined
 rect.onMouseDown((_, e) => toggleCell(e.clientX, e.clientY))
@@ -671,6 +658,7 @@ let sync
 let database
 const Uuid = () => Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
 const handledInteractions = []
+const unhandledInteractions = []
 const subscribeToInteractions = () => {
     database.ref('session-interactions').on("value", (snapshot) => {
         const value = snapshot.val()
@@ -695,22 +683,50 @@ const subscribeToInteractions = () => {
                 unhandledInteractions.push(interaction)
             }
         }
-        // Handle unhandled interactions.
-        const len = unhandledInteractions.length
-        for (let i = 0; i < len; i ++) {
-            const interaction = unhandledInteractions[i]
-            // Handle remote interaction.
-            const { uuid, x, y, pattern, state } = interaction
-            handleInteraction(pattern, x, y, state === 'undefined' ? undefined : (state === 'true'? true : false))
-
-            // Mark as handled.
-            handledInteractions.push(interaction.uuid)
-        }
+        
+        checkUnhandledInteractions(unhandledInteractions)
     })
+}
+const checkUnhandledInteractions = (interactionsList: Array<any>) => {
+    if (interactionsList.length === 0)
+        return    
+    // Sort unhandled interactions list on 'cycle' ascending order.
+    const interactions = interactionsList.sort((a, b) => a.cycle - b.cycle)
+    if (interactions[0].cycle < cycle) {
+        // Back-tracking will be necessary ...
+        console.log('TODO: Backtrack interaction from: ',interactions[0].cycle, 'cur',cycle)
+        throw new Error()
+    } else {
+        // All unhandled interactions should be of the current cycle.
+        // They can be handled as is.
+        for (const interaction of interactionsList)
+            handleInteraction(interaction)
+    }
+    plot()
+}
+const handleInteraction = (interaction) => {
+    let { uuid, pattern, locationCol, locationRow, state } = interaction
+    state = state === 'undefined' ? undefined : (state === 'true'? true : false)
+    const pHeight = pattern.length
+    const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
+
+    for (let y = 0; y < pattern.length; y ++) {
+        for (let x = 0; x < pattern[y].length; x ++) {
+            if (pattern[y][x] === true) {
+                const col = Math.round(locationCol + x - pWidth / 2)
+                const row = Math.round(locationRow - y + pHeight / 2)
+                gameOfLife.cellStates[col][row] = (state === undefined) ?
+                    (gameOfLife.cellStates[col][row] === true ? false : true):
+                    state
+            }
+        }
+    }
+    // Mark as handled. Can result in duplicate entries !
+    handledInteractions.push(uuid)  
 }
 const host = () => {
     database = firebase.database()
-    let cycle = 0
+    cycle = -1
     const initialState = gameOfLife.encodeState()
     const interactions = []
 
@@ -719,10 +735,28 @@ const host = () => {
     database.ref('session-cycle').set(cycle)
     database.ref('session-interactions').set(interactions)
 
+    // Host saves n previous states, in case it needs to back-track to previous states.
+    // This can be necessary, if a client is too slow to report of its interactions in time.
+    const savedStates = []
+
     sync = () => {
         cycle++
-        console.log('hosted session | cycle:',cycle)
         database.ref('session-cycle').set(cycle)
+        
+        // Handle interactions before current cycle.
+        checkUnhandledInteractions(unhandledInteractions)
+        
+        // Cache state for enabling back-tracking.
+        if (savedStates.length >= 5)
+            savedStates.shift()
+        savedStates.push({
+            cycle,
+            // Note that the saved state also doesn't contain any interactions
+            // triggered by host !
+            state: gameOfLife.encodeState()
+        })
+
+        // ... gameOfLife.cycle()
     }
     sync()
 
@@ -737,7 +771,6 @@ const host = () => {
 }
 const connect = () => {
     database = firebase.database()
-    let cycle
 
     // Disable local ablitiy to toggle simulation.
     simulationActive = false
@@ -758,7 +791,13 @@ const connect = () => {
             initialValue = false
         } else {
             // Sync with cycle on database.
-            for (; cycle < value; cycle ++) {
+            for (cycle = cycle; cycle < value; cycle ++) {
+                // Handle unhandled interactions of this cycle only.
+                for (const unhandledInteraction of unhandledInteractions) {
+                    if (cycle === unhandledInteraction.cycle)
+                        handleInteraction(unhandledInteraction)
+                }
+                
                 gameOfLife.cycle()
             }
         }
