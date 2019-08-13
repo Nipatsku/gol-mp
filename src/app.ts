@@ -317,7 +317,7 @@ const nextCycle = () => {
     gameOfLife.cycle()
     plot()
     if (simulationActive)
-        setTimeout(nextCycle, 200)
+        setTimeout(nextCycle, 1000)
         // requestAnimationFrame(nextCycle)
 }
 const col = chart.addUIElement(UILayoutBuilders.Column)
@@ -338,15 +338,30 @@ toggleSimulationButton.onSwitch((_, state) => {
     })
 if (simulationActive)
     toggleSimulationButton.setOn(true)
-col.addElement(UIElementBuilders.ButtonBox)
+const clearButton = col.addElement(UIElementBuilders.ButtonBox)
     .setText('Clear')
     .setFont((font) => font
         .setSize(fontSize)
     )
-    .onSwitch((_, state) => {
+clearButton.onSwitch((_, state) => {
         if (state) {
             gameOfLife.clear(gameOfLife.cellStates)
             plot()
+
+            if (database) {
+                // Sync clear with DB. We must be host.
+                if (database) {
+                    const key = database.ref().child('session-interactions').push().key
+                    const uuid = Uuid()
+                    const interactionData = {
+                        type: 'clear',
+                        uuid
+                    }
+                    const updates = {}
+                    updates['/session-interactions/' + key] = interactionData
+                    database.ref().update(updates)
+                }
+            }
         }
     })
 const pencilSelector = chart.addUIElement(UILayoutBuilders.Row
@@ -610,6 +625,7 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     const pattern = selectedPattern
     const uuid = Uuid()
     const interactionData = {
+        type: 'draw',
         uuid,
         cycle,
         locationCol,
@@ -713,7 +729,6 @@ const checkUnhandledInteractions = (interactionsList: Array<any>) => {
 
         // Back-track to oldest unhandled interactions cycle.
         let backTrackedCycle = interactions[0].cycle
-        console.log('back-tracking ',backTrackedCycle, cycle)
         backtrackTo(backTrackedCycle)
 
         // Iterate over cycles leading to current one.
@@ -744,22 +759,31 @@ const checkUnhandledInteractions = (interactionsList: Array<any>) => {
     plot()
 }
 const handleInteraction = (interaction) => {
-    let { uuid, pattern, locationCol, locationRow, state } = interaction
-    state = state === 'undefined' ? undefined : (state === 'true'? true : false)
-    const pHeight = pattern.length
-    const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
+    const { uuid, type } = interaction
+    if (type === 'draw') {
+        let { pattern, locationCol, locationRow, state } = interaction
+        state = state === 'undefined' ? undefined : (state === 'true'? true : false)
+        const pHeight = pattern.length
+        const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
+    
+        console.log('draw interaction at', locationCol, locationRow)
 
-    for (let y = 0; y < pattern.length; y ++) {
-        for (let x = 0; x < pattern[y].length; x ++) {
-            if (pattern[y][x] === true) {
-                const col = Math.round(locationCol + x - pWidth / 2)
-                const row = Math.round(locationRow - y + pHeight / 2)
-                gameOfLife.cellStates[col][row] = (state === undefined) ?
-                    (gameOfLife.cellStates[col][row] === true ? false : true):
-                    state
+        for (let y = 0; y < pattern.length; y ++) {
+            for (let x = 0; x < pattern[y].length; x ++) {
+                if (pattern[y][x] === true) {
+                    const col = Math.round(locationCol + x - pWidth / 2)
+                    const row = Math.round(locationRow - y + pHeight / 2)
+                    gameOfLife.cellStates[col][row] = (state === undefined) ?
+                        (gameOfLife.cellStates[col][row] === true ? false : true):
+                        state
+                }
             }
         }
+    } else if (type === 'clear') {
+        gameOfLife.clear(gameOfLife.cellStates)
+        plot()
     }
+
     // Mark as handled (check for duplicates first).
     if (handledInteractions.find((item) => item.uuid === uuid) === undefined)
         handledInteractions.push(interaction)  
@@ -841,13 +865,15 @@ const connect = () => {
 
     subscribeToInteractions()
 
-    mpToolbox.dispose()
     // Disable connection selectors.
+    mpToolbox.dispose()
     mpToolbox.dispose()
     chart.addUIElement(UIElementBuilders.TextBox)
         .setPosition({x: 100, y: 100})
         .setOrigin(UIOrigins.RightTop)
         .setText('Connected to remote session')
+
+    clearButton.dispose()
 }
 mpToolbox.addElement(UIElementBuilders.ButtonBox)
     .setText('Host')
