@@ -290,7 +290,6 @@ class GameOfLife {
             y2: axisY.scale.getInnerEnd()
         }
         this.outOfBoundsRight.setDimensions(dimensionsRight)
-
         const dimensionsTop = {
             x1: 0,
             y1: (height + 1) * this.px,
@@ -662,15 +661,21 @@ const toggleCell = (clientX: number, clientY: number, state?: boolean) => {
     )
     const locationCol = location.x / gameOfLife.px
     const locationRow = location.y / gameOfLife.px
-    // Check if location is within game of life boundaries.
-    const locationColRound = Math.round(locationCol)
-    const locationRowRound = Math.round(locationRow)
+    const pattern = selectedPattern
+    const pHeight = pattern.length
+    const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
     const {bounds} = gameOfLife.getState()
-    if (locationColRound < bounds.x.min || locationColRound > bounds.x.max || locationRowRound < bounds.y.min || locationRowRound > bounds.y.max) {
+
+    // Check if location is within game of life boundaries.
+    if (
+        Math.round(locationCol - pWidth * .5)  < bounds.x.min ||
+        Math.round(locationCol + pWidth * .5)  > bounds.x.max ||
+        Math.round(locationRow - pHeight * .5)  < bounds.y.min ||
+        Math.round(locationRow + pHeight * .5)  > bounds.y.max
+    ) {
         return
     }
 
-    const pattern = selectedPattern
     const uuid = Uuid()
     const interactionData = {
         type: 'draw',
@@ -814,8 +819,6 @@ const handleInteraction = (interaction) => {
         const pHeight = pattern.length
         const pWidth = pattern.reduce((prev, cur) => Math.max(prev, cur.length), 0)
     
-        console.log('draw interaction at', locationCol, locationRow)
-
         for (let y = 0; y < pattern.length; y ++) {
             for (let x = 0; x < pattern[y].length; x ++) {
                 if (pattern[y][x] === true) {
